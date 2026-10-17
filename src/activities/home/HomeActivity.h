@@ -106,6 +106,7 @@ class HomeActivity final : public Activity {
   void onOpdsBrowserOpen();
   void onReadingStatsOpen();
   void onSavedItemsOpen();
+  void onOrbiteOpen(bool today);  // Orbite add-on: Today or the Workout of the day
 
   int getMenuItemCount() const;
   bool storeCoverBuffer();    // Store frame buffer for cover image

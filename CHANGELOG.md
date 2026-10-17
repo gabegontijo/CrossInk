@@ -1,3 +1,9 @@
+## [Unreleased] - Orbite add-on
+
+### Added
+
+- Orbite add-on (X3): **Hoje** and the day's workout on Home, read from `/Orbite/hoje.json` that the Orbite app sends over File Transfer or writes to the card. Read-only lists with section headers; an out-of-date line when the RTC is on another day. See `docs/orbite.md`.
+
 ## [v1.6.1] - 2026-10-03
 
 ### Added

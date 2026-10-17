@@ -39,6 +39,7 @@
 #include "activities/home/HomeActivity.h"
 #include "activities/home/RecentBookProgress.h"
 #include "activities/library/LibraryActivity.h"
+#include "activities/orbite/OrbiteDayActivity.h"
 #include "activities/reader/BookReadingStats.h"
 #include "activities/reader/EpubReaderDrawerActivity.h"
 #include "activities/reader/ReaderFontLoading.h"
@@ -95,8 +96,26 @@ enum class SmokeStep : uint8_t {
   ThemeFresh,
   StatusBarEditor,
   StatusBarPicker,
+  OrbiteHome,
+  OrbiteToday,
+  OrbiteWorkout,
   Done,
 };
+
+// What the Orbite app writes to /Orbite/hoje.json (see src/orbite/OrbiteDay.h).
+constexpr char ORBITE_SMOKE_DAY[] =
+    R"({"orbite": 1, "dia": "2026-10-15", "titulo": "Quinta, 15 de outubro", "feitoEm": "07:12",
+"resumo": {"itens": 7, "treino": "Treino A"},
+"secoes": [
+ {"titulo": "Agenda", "itens": [{"quando": "14:30", "texto": "Dentista", "nota": "Centro"}]},
+ {"titulo": "Para fazer", "itens": [{"quando": "", "texto": "Limpar os banheiros", "nota": "desde 13/10"},
+  {"quando": "", "texto": "Lavar roupa", "nota": ""}, {"quando": "", "texto": "Renovar o documento", "nota": "prioridade"}]},
+ {"titulo": "Doses", "itens": [{"quando": "20:00", "texto": "Vitamina D", "nota": "1 cápsula"}]},
+ {"titulo": "Contas", "itens": [{"quando": "", "texto": "Internet", "nota": "R$ 99,90 · venceu 13/10"},
+  {"quando": "", "texto": "Luz", "nota": "R$ 230,00 · hoje"}]}],
+"treino": {"titulo": "Treino A", "detalhe": "Smart Fit 06:00–22:00", "itens": [
+ {"quando": "3 × 10", "texto": "Supino reto", "nota": "20 kg"}, {"quando": "4 × 8-12", "texto": "Agachamento livre", "nota": ""},
+ {"quando": "3 × 12", "texto": "Remada baixa", "nota": "35 kg"}, {"quando": "3 × 30 s", "texto": "Prancha", "nota": ""}]}})";
 
 class HomeReaderSmokeActivity final : public Activity {
  public:
@@ -1228,6 +1247,16 @@ class SimulatorSmokeTest {
     switch (step) {
       case SmokeStep::Start:
         LOG_INF("SMOKE", "Starting simulator smoke test");
+        // Orbite add-on: Home with the two rows, then the Today and Workout screens, captured as PGM.
+        if (std::getenv("CROSSINK_SIMULATOR_SMOKE_ORBITE")) {
+          I18N.setLanguage(Language::PT);
+          if (!Storage.mkdir("/Orbite") || !Storage.writeFile(orbite::HOJE_PATH, ORBITE_SMOKE_DAY)) {
+            fail("Cannot create the Orbite fixture");
+          }
+          activityManager.replaceActivity(std::make_unique<HomeActivity>(renderer, mappedInputManager));
+          queueStep("Orbite Home", SmokeStep::OrbiteHome, 4);
+          break;
+        }
         if (std::getenv("CROSSINK_SIMULATOR_SMOKE_STATUS_BARS")) {
           verifyStatusBarSettings();
           SETTINGS.clockDateHasBeenSynced = true;
@@ -1817,6 +1846,28 @@ class SimulatorSmokeTest {
         inputCompletionStep = SmokeStep::StatusBarPicker;
         step = SmokeStep::ReaderInput;
         break;
+      }
+      case SmokeStep::OrbiteHome: {
+        RenderLock lock;
+        captureStatusBarScreen("orbite-home");
+      }
+        activityManager.replaceActivity(
+            std::make_unique<OrbiteDayActivity>(renderer, mappedInputManager, OrbiteDayActivity::Mode::Today));
+        queueStep("Orbite Today", SmokeStep::OrbiteToday, 4);
+        break;
+      case SmokeStep::OrbiteToday: {
+        RenderLock lock;
+        captureStatusBarScreen("orbite-today");
+      }
+        activityManager.replaceActivity(
+            std::make_unique<OrbiteDayActivity>(renderer, mappedInputManager, OrbiteDayActivity::Mode::Workout));
+        queueStep("Orbite Workout", SmokeStep::OrbiteWorkout, 4);
+        break;
+      case SmokeStep::OrbiteWorkout: {
+        RenderLock lock;
+        captureStatusBarScreen("orbite-workout");
+        LOG_INF("SMOKE", "Simulator smoke test passed: Orbite Home, Today and Workout");
+        std::_Exit(0);
       }
       case SmokeStep::StatusBarPicker: {
         RenderLock lock;

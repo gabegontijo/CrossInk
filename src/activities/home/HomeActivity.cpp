@@ -35,11 +35,13 @@
 #include "RecentBookProgress.h"
 #include "RecentBooksStore.h"
 #include "SavedItemsHomeActivity.h"
+#include "activities/orbite/OrbiteDayActivity.h"
 #include "components/UITheme.h"
 #include "components/themes/dashboard/DashboardTheme.h"
 #include "components/themes/lyra/LyraCarouselTheme.h"
 #include "components/themes/minimal/MinimalTheme.h"
 #include "fontIds.h"
+#include "orbite/OrbiteStore.h"
 
 namespace {
 constexpr uint32_t CAROUSEL_CACHE_MAGIC = 0x43434152;  // "CCAR"
@@ -54,6 +56,8 @@ constexpr unsigned long HOME_BOOK_SWAP_LONG_PRESS_MS = 1000;
 constexpr int HOME_BOOK_SWAP_RECENT_COUNT = 2;
 
 enum class HomeMenuAction {
+  OrbiteToday,
+  OrbiteWorkout,
   BrowseFiles,
   ContinueReading,
   Library,
@@ -71,7 +75,7 @@ struct HomeMenuEntry {
 };
 
 struct HomeMenuEntries {
-  static constexpr int kCapacity = 8;
+  static constexpr int kCapacity = 10;  // + the two Orbite rows
   std::array<HomeMenuEntry, kCapacity> entries{};
   int count = 0;
 
@@ -84,6 +88,18 @@ struct HomeMenuEntries {
 
   const HomeMenuEntry& operator[](int index) const { return entries[index]; }
 };
+
+// Orbite add-on: what /Orbite/hoje.json says, read on each Home entry (a few KB, parsed through a filter).
+bool gHasOrbiteDay = false;
+orbite::Summary gOrbiteSummary;
+
+void appendOrbiteMenuItems(HomeMenuEntries& items) {
+  if (!gHasOrbiteDay) return;
+  items.push({tr(STR_ORBITE_TODAY), Recent, HomeMenuAction::OrbiteToday});
+  if (!gOrbiteSummary.workoutTitle.empty()) {
+    items.push({gOrbiteSummary.workoutTitle.c_str(), Chart, HomeMenuAction::OrbiteWorkout});
+  }
+}
 
 bool containsPoint(const Rect& rect, const int x, const int y) {
   return x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height;
@@ -235,6 +251,7 @@ const char* savedItemsLabel(bool hasBookmarks, bool hasClippings) {
 
 void appendHomeMenuItems(HomeMenuEntries& items, bool hasOpdsServers, bool hasReadingStats, bool hasBookmarks,
                          bool hasClippings) {
+  appendOrbiteMenuItems(items);
   items.push({tr(STR_BROWSE_FILES), Folder, HomeMenuAction::BrowseFiles});
   items.push({tr(STR_LIBRARY), Library, HomeMenuAction::Library});
 
@@ -260,6 +277,7 @@ HomeMenuEntries buildHomeMenuItems(bool hasOpdsServers, bool hasReadingStats, bo
 
 HomeMenuEntries buildMinimalMenuItems(bool hasOpdsServers, bool hasReadingStats, bool hasBookmarks, bool hasClippings) {
   HomeMenuEntries items;
+  appendOrbiteMenuItems(items);
   if (SETTINGS.isLibraryFileBrowserSwapped()) {
     items.push({tr(STR_BROWSE_FILES), Folder, HomeMenuAction::BrowseFiles});
   } else {
@@ -813,6 +831,7 @@ void HomeActivity::onEnter() {
   Activity::onEnter();
 
   hasOpdsServers = OPDS_STORE.hasServers();
+  gHasOrbiteDay = orbite::loadSummary(gOrbiteSummary);
   if (UITheme::hasCoverGridHome()) {
     coverGridUi = makeUniqueNoThrow<CoverGridHomeUi>(renderer);
     if (!coverGridUi) LOG_ERR("HOME", "Cannot allocate cover grid UI; using standard Home");
@@ -1457,6 +1476,12 @@ void HomeActivity::loop() {
 
       auto activateMinimalMenuAction = [this, &menuItems]() {
         switch (menuItems[minimalMenuIndex].action) {
+          case HomeMenuAction::OrbiteToday:
+            onOrbiteOpen(true);
+            break;
+          case HomeMenuAction::OrbiteWorkout:
+            onOrbiteOpen(false);
+            break;
           case HomeMenuAction::BrowseFiles:
             onFileBrowserOpen();
             break;
@@ -1699,6 +1724,12 @@ void HomeActivity::loop() {
 
   auto activateHomeMenuAction = [this](const HomeMenuAction action) {
     switch (action) {
+      case HomeMenuAction::OrbiteToday:
+        onOrbiteOpen(true);
+        break;
+      case HomeMenuAction::OrbiteWorkout:
+        onOrbiteOpen(false);
+        break;
       case HomeMenuAction::BrowseFiles:
         onFileBrowserOpen();
         break;
@@ -2382,6 +2413,12 @@ void HomeActivity::onReadingStatsOpen() {
                              requestUpdate();
                            });
   }
+}
+
+void HomeActivity::onOrbiteOpen(const bool today) {
+  const auto mode = today ? OrbiteDayActivity::Mode::Today : OrbiteDayActivity::Mode::Workout;
+  startActivityForResult(std::make_unique<OrbiteDayActivity>(renderer, mappedInput, mode),
+                         [this](const ActivityResult&) { requestUpdate(); });
 }
 
 void HomeActivity::onSavedItemsOpen() {
