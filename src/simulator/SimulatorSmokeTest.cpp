@@ -13,6 +13,8 @@
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 
 #include "CrossPointState.h"
 #if CROSSINK_SCALABLE_FONTS
@@ -52,6 +54,7 @@
 #include "components/HeaderDate.h"
 #include "components/TouchHeaderBackButton.h"
 #include "components/UITheme.h"
+#include "orbite/OrbiteStore.h"
 #include "simulator/SimulatorHomeKeyInput.h"
 #include "util/ButtonShortcutController.h"
 
@@ -97,25 +100,58 @@ enum class SmokeStep : uint8_t {
   StatusBarEditor,
   StatusBarPicker,
   OrbiteHome,
+  OrbiteHomeNav,
   OrbiteToday,
-  OrbiteWorkout,
+  OrbiteMarked,
+  OrbiteBottom,
+  OrbiteLists,
+  OrbiteListsUnmarked,
+  OrbiteListsAgain,
+  OrbiteWorkouts,
+  OrbiteWorkoutOpen,
+  OrbiteWorkoutsAgain,
+  OrbiteWorkoutsHome,
   Done,
 };
 
-// What the Orbite app writes to /Orbite/hoje.json (see src/orbite/OrbiteDay.h).
+// What the Orbite app writes to /Orbite/hoje.json (see src/orbite/OrbiteDay.h), with a task and a list item already
+// done there, and two marks already made on the reader.
 constexpr char ORBITE_SMOKE_DAY[] =
-    R"({"orbite": 1, "dia": "2026-10-15", "titulo": "Quinta, 15 de outubro", "feitoEm": "07:12",
-"resumo": {"itens": 7, "treino": "Treino A"},
+    R"({"orbite": 2, "dia": "2026-10-15", "titulo": "Quinta, 15 de outubro", "feitoEm": "07:12",
+"resumo": {"itens": 7, "listas": 2, "treinos": 2, "treinoDoDia": "Treino A"},
 "secoes": [
- {"titulo": "Agenda", "itens": [{"quando": "14:30", "texto": "Dentista", "nota": "Centro"}]},
- {"titulo": "Para fazer", "itens": [{"quando": "", "texto": "Limpar os banheiros", "nota": "desde 13/10"},
-  {"quando": "", "texto": "Lavar roupa", "nota": ""}, {"quando": "", "texto": "Renovar o documento", "nota": "prioridade"}]},
- {"titulo": "Doses", "itens": [{"quando": "20:00", "texto": "Vitamina D", "nota": "1 cápsula"}]},
- {"titulo": "Contas", "itens": [{"quando": "", "texto": "Internet", "nota": "R$ 99,90 · venceu 13/10"},
-  {"quando": "", "texto": "Luz", "nota": "R$ 230,00 · hoje"}]}],
-"treino": {"titulo": "Treino A", "detalhe": "Smart Fit 06:00–22:00", "itens": [
- {"quando": "3 × 10", "texto": "Supino reto", "nota": "20 kg"}, {"quando": "4 × 8-12", "texto": "Agachamento livre", "nota": ""},
- {"quando": "3 × 12", "texto": "Remada baixa", "nota": "35 kg"}, {"quando": "3 × 30 s", "texto": "Prancha", "nota": ""}]}})";
+ {"titulo": "Aniversários", "itens": [{"id": "", "quando": "", "texto": "Mãe", "nota": "em 2 dias · faz 60 anos"}]},
+ {"titulo": "Agenda", "itens": [{"id": "c:dentista01", "quando": "14:30", "texto": "Dentista", "nota": "Centro"}]},
+ {"titulo": "Para fazer", "itens": [{"id": "r:banheiro01@2026-10-13", "quando": "", "texto": "Limpar os banheiros", "nota": "desde 13/10"},
+  {"id": "r:roupa00001@2026-10-15", "quando": "", "texto": "Lavar roupa", "nota": ""},
+  {"id": "l:lista-tarefas/doc0000001", "quando": "", "texto": "Renovar o documento", "nota": "prioridade"},
+  {"id": "r:regar00001@2026-10-15", "quando": "", "texto": "Regar as plantas", "nota": "", "feito": true}]},
+ {"titulo": "Treino", "itens": [{"id": "t:fichaA0001@2026-10-15", "quando": "", "texto": "Treino A · peito, ombros e tríceps",
+  "nota": "7 exercícios · Contorno do Corpo 05:00–22:00"}]},
+ {"titulo": "Doses", "itens": [{"id": "d:vitamina01@2026-10-15@20:00", "quando": "20:00", "texto": "Vitamina D", "nota": "1 cápsula"}]},
+ {"titulo": "Cardápio", "itens": [{"id": "", "quando": "Almoço", "texto": "Frango com legumes", "nota": "marmita"},
+  {"id": "", "quando": "Jantar", "texto": "Sopa", "nota": ""}]},
+ {"titulo": "Contas", "itens": [{"id": "", "quando": "", "texto": "Internet", "nota": "R$ 99,90 · venceu 13/10"},
+  {"id": "", "quando": "", "texto": "Luz", "nota": "R$ 230,00 · hoje"}]},
+ {"titulo": "Viagem", "itens": [{"id": "", "quando": "", "texto": "São Paulo", "nota": "começa em 5 dias"},
+  {"id": "", "quando": "20/10", "texto": "Divinópolis → São Paulo", "nota": "06:30"}]},
+ {"titulo": "Amanhã", "itens": [{"id": "", "quando": "20:00", "texto": "Cinema", "nota": ""}]},
+ {"titulo": "Dinheiro em outubro", "itens": [{"id": "", "quando": "", "texto": "Falta pagar", "nota": "R$ 1.829,90"},
+  {"id": "", "quando": "", "texto": "Sobra prevista", "nota": "R$ 3.170,10"}]}],
+"listas": [
+ {"titulo": "Supermercado", "itens": [{"id": "l:lista-mercado/leite00001", "quando": "", "texto": "Leite", "nota": ""},
+  {"id": "l:lista-mercado/cafe000001", "quando": "", "texto": "Café", "nota": ""},
+  {"id": "l:lista-mercado/tomate0001", "quando": "", "texto": "Tomate", "nota": ""},
+  {"id": "l:lista-mercado/pao0000001", "quando": "", "texto": "Pão", "nota": "", "feito": true}]},
+ {"titulo": "Tarefas", "itens": [{"id": "l:lista-tarefas/doc0000001", "quando": "", "texto": "Renovar o documento", "nota": "prioridade"}]}],
+"treinos": [
+ {"id": "t:fichaA0001", "titulo": "Treino A", "detalhe": "Smart Fit 06:00–22:00", "hoje": true, "itens": [
+  {"id": "e:fichaA0001/supino0001", "quando": "3 × 10", "texto": "Supino reto", "nota": "20 kg"},
+  {"id": "e:fichaA0001/agacha0001", "quando": "4 × 8-12", "texto": "Agachamento livre", "nota": ""}]},
+ {"id": "t:fichaB0001", "titulo": "Treino B", "detalhe": "", "hoje": false, "itens": [
+  {"id": "e:fichaB0001/remada0001", "quando": "3 × 12", "texto": "Remada baixa", "nota": "35 kg"}]}]})";
+constexpr char ORBITE_SMOKE_MARKS[] =
+    R"({"orbite": 2, "feitos": ["r:roupa00001@2026-10-15", "l:lista-mercado/leite00001"]})";
 
 class HomeReaderSmokeActivity final : public Activity {
  public:
@@ -1250,7 +1286,16 @@ class SimulatorSmokeTest {
         // Orbite add-on: Home with the two rows, then the Today and Workout screens, captured as PGM.
         if (std::getenv("CROSSINK_SIMULATOR_SMOKE_ORBITE")) {
           I18N.setLanguage(Language::PT);
-          if (!Storage.mkdir("/Orbite") || !Storage.writeFile(orbite::HOJE_PATH, ORBITE_SMOKE_DAY)) {
+          // A real day from the Orbite (CROSSINK_SIMULATOR_SMOKE_ORBITE_DAY, a hoje.json) only shows the screens; the
+          // built-in fixture also checks the marks.
+          if (const char* dayFile = std::getenv("CROSSINK_SIMULATOR_SMOKE_ORBITE_DAY")) {
+            std::ifstream in(dayFile);
+            const std::string day((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+            if (day.empty() || !Storage.mkdir("/Orbite") || !Storage.writeFile(orbite::HOJE_PATH, day.c_str())) {
+              fail("Cannot use the Orbite day %s", dayFile);
+            }
+          } else if (!Storage.mkdir("/Orbite") || !Storage.writeFile(orbite::HOJE_PATH, ORBITE_SMOKE_DAY) ||
+                     !Storage.writeFile(orbite::FEITOS_PATH, ORBITE_SMOKE_MARKS)) {
             fail("Cannot create the Orbite fixture");
           }
           activityManager.replaceActivity(std::make_unique<HomeActivity>(renderer, mappedInputManager));
@@ -1848,27 +1893,183 @@ class SimulatorSmokeTest {
         break;
       }
       case SmokeStep::OrbiteHome: {
-        RenderLock lock;
-        captureStatusBarScreen("orbite-home");
+        {
+          RenderLock lock;
+          captureStatusBarScreen("orbite-home");
+        }
+        // The Orbite rows count in the navigation: Up from the top wraps to the last row (Settings), not short of it.
+        inputScript = {press(MappedInputManager::Button::Up),
+                       release(MappedInputManager::Button::Up),
+                       render("Orbite Home last row", 3),
+                       press(MappedInputManager::Button::Confirm),
+                       release(MappedInputManager::Button::Confirm),
+                       render("Settings from Orbite Home", 4),
+                       assertActivity("Settings")};
+        scriptIndex = 0;
+        inputCompletionStep = SmokeStep::OrbiteHomeNav;
+        step = SmokeStep::ReaderInput;
+        break;
       }
+      case SmokeStep::OrbiteHomeNav:
         activityManager.replaceActivity(
             std::make_unique<OrbiteDayActivity>(renderer, mappedInputManager, OrbiteDayActivity::Mode::Today));
         queueStep("Orbite Today", SmokeStep::OrbiteToday, 4);
         break;
       case SmokeStep::OrbiteToday: {
+        {
+          RenderLock lock;
+          captureStatusBarScreen("orbite-today");
+        }
+        // Confirm marks the selected item (the first: the appointment) and keeps it in /Orbite/feitos.json.
+        inputScript = {press(MappedInputManager::Button::Confirm), release(MappedInputManager::Button::Confirm),
+                       render("Orbite Today marked", 4)};
+        scriptIndex = 0;
+        inputCompletionStep = SmokeStep::OrbiteMarked;
+        step = SmokeStep::ReaderInput;
+        break;
+      }
+      case SmokeStep::OrbiteMarked: {
+        orbite::Marks marks;
+        orbite::loadMarks(marks);
+        if (!std::getenv("CROSSINK_SIMULATOR_SMOKE_ORBITE_DAY") &&
+            (!orbite::isMarked(marks.done, "c:dentista01") ||
+             !orbite::isMarked(marks.done, "r:roupa00001@2026-10-15"))) {
+          fail("Confirm did not keep the Orbite mark (%zu marks)", marks.size());
+        }
+        {
+          RenderLock lock;
+          captureStatusBarScreen("orbite-today-marked");
+        }
+        // Down, item by item, to the end of the day (the sections only the X3 has).
+        inputScript.clear();
+        for (int i = 0; i < 15; ++i) {
+          inputScript.push_back(press(MappedInputManager::Button::Down));
+          inputScript.push_back(release(MappedInputManager::Button::Down));
+        }
+        inputScript.push_back(render("Orbite Today bottom", 4));
+        scriptIndex = 0;
+        inputCompletionStep = SmokeStep::OrbiteBottom;
+        step = SmokeStep::ReaderInput;
+        break;
+      }
+      case SmokeStep::OrbiteBottom: {
         RenderLock lock;
-        captureStatusBarScreen("orbite-today");
+        captureStatusBarScreen("orbite-today-bottom");
       }
         activityManager.replaceActivity(
-            std::make_unique<OrbiteDayActivity>(renderer, mappedInputManager, OrbiteDayActivity::Mode::Workout));
-        queueStep("Orbite Workout", SmokeStep::OrbiteWorkout, 4);
+            std::make_unique<OrbiteDayActivity>(renderer, mappedInputManager, OrbiteDayActivity::Mode::Lists));
+        queueStep("Orbite Lists", SmokeStep::OrbiteLists, 4);
         break;
-      case SmokeStep::OrbiteWorkout: {
-        RenderLock lock;
-        captureStatusBarScreen("orbite-workout");
-        LOG_INF("SMOKE", "Simulator smoke test passed: Orbite Home, Today and Workout");
-        std::_Exit(0);
+      case SmokeStep::OrbiteLists: {
+        {
+          RenderLock lock;
+          captureStatusBarScreen("orbite-lists");
+        }
+        // The lists first: Confirm opens Supermercado on its first item still to do (Café: Leite was marked here), and
+        // Pão came done from the Orbite: Down twice and Confirm unmarks it, handed back in /Orbite/feitos.json.
+        inputScript = {press(MappedInputManager::Button::Confirm),
+                       release(MappedInputManager::Button::Confirm),
+                       render("Orbite Supermercado", 4),
+                       press(MappedInputManager::Button::Down),
+                       release(MappedInputManager::Button::Down),
+                       press(MappedInputManager::Button::Down),
+                       release(MappedInputManager::Button::Down),
+                       press(MappedInputManager::Button::Confirm),
+                       release(MappedInputManager::Button::Confirm),
+                       render("Orbite Lists unmarked", 4)};
+        scriptIndex = 0;
+        inputCompletionStep = SmokeStep::OrbiteListsUnmarked;
+        step = SmokeStep::ReaderInput;
+        break;
       }
+      case SmokeStep::OrbiteListsUnmarked: {
+        orbite::Marks marks;
+        orbite::loadMarks(marks);
+        if (!std::getenv("CROSSINK_SIMULATOR_SMOKE_ORBITE_DAY") &&
+            (!orbite::isMarked(marks.undone, "l:lista-mercado/pao0000001") ||
+             orbite::isMarked(marks.done, "l:lista-mercado/tomate0001") ||
+             orbite::isMarked(marks.done, "l:lista-mercado/cafe000001"))) {
+          fail("Confirm did not hand back the unmarked Orbite item (%zu unmarked)", marks.undone.size());
+        }
+        {
+          RenderLock lock;
+          captureStatusBarScreen("orbite-lists-unmarked");
+        }
+        // Back goes to the lists (still the Orbite screen, not Home).
+        inputScript = {press(MappedInputManager::Button::Back), release(MappedInputManager::Button::Back),
+                       render("Orbite Lists again", 4), assertActivity("OrbiteDay")};
+        scriptIndex = 0;
+        inputCompletionStep = SmokeStep::OrbiteListsAgain;
+        step = SmokeStep::ReaderInput;
+        break;
+      }
+      case SmokeStep::OrbiteListsAgain: {
+        {
+          RenderLock lock;
+          captureStatusBarScreen("orbite-lists-again");
+        }
+        activityManager.replaceActivity(
+            std::make_unique<OrbiteDayActivity>(renderer, mappedInputManager, OrbiteDayActivity::Mode::Workouts));
+        queueStep("Orbite Workouts", SmokeStep::OrbiteWorkouts, 4);
+        break;
+      }
+      case SmokeStep::OrbiteWorkouts: {
+        {
+          RenderLock lock;
+          captureStatusBarScreen("orbite-workouts");
+        }
+        // The sheets first: Down to Treino B, Confirm opens it, and Confirm marks its exercise.
+        inputScript = {press(MappedInputManager::Button::Down),
+                       release(MappedInputManager::Button::Down),
+                       press(MappedInputManager::Button::Confirm),
+                       release(MappedInputManager::Button::Confirm),
+                       render("Orbite Workout B", 4),
+                       press(MappedInputManager::Button::Confirm),
+                       release(MappedInputManager::Button::Confirm),
+                       render("Orbite Workout B marked", 4)};
+        scriptIndex = 0;
+        inputCompletionStep = SmokeStep::OrbiteWorkoutOpen;
+        step = SmokeStep::ReaderInput;
+        break;
+      }
+      case SmokeStep::OrbiteWorkoutOpen: {
+        orbite::Marks marks;
+        orbite::loadMarks(marks);
+        if (!std::getenv("CROSSINK_SIMULATOR_SMOKE_ORBITE_DAY") &&
+            !orbite::isMarked(marks.done, "e:fichaB0001/remada0001")) {
+          fail("Confirm did not open Treino B and mark its exercise (%zu marks)", marks.size());
+        }
+        {
+          RenderLock lock;
+          captureStatusBarScreen("orbite-workout-b");
+        }
+        // Back goes to the sheets, Treino B now 1/1 (still the Orbite screen, not Home).
+        inputScript = {press(MappedInputManager::Button::Back), release(MappedInputManager::Button::Back),
+                       render("Orbite Workouts again", 4), assertActivity("OrbiteDay")};
+        scriptIndex = 0;
+        inputCompletionStep = SmokeStep::OrbiteWorkoutsAgain;
+        step = SmokeStep::ReaderInput;
+        break;
+      }
+      case SmokeStep::OrbiteWorkoutsAgain: {
+        {
+          RenderLock lock;
+          captureStatusBarScreen("orbite-workouts-again");
+        }
+        // And Back from the sheets goes Home.
+        inputScript = {press(MappedInputManager::Button::Back), release(MappedInputManager::Button::Back),
+                       render("Home from Orbite Workouts", 4), assertActivity("Home")};
+        scriptIndex = 0;
+        inputCompletionStep = SmokeStep::OrbiteWorkoutsHome;
+        step = SmokeStep::ReaderInput;
+        break;
+      }
+      case SmokeStep::OrbiteWorkoutsHome:
+        LOG_INF(
+            "SMOKE",
+            "Simulator smoke test passed: Orbite Home, Today (marked), Lists (Supermercado opened, an item unmarked) "
+            "and Workouts (sheet B opened)");
+        std::_Exit(0);
       case SmokeStep::StatusBarPicker: {
         RenderLock lock;
         captureStatusBarScreen("display-picker");

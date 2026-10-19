@@ -2,7 +2,10 @@
 
 ### Added
 
-- Orbite add-on (X3): **Hoje** and the day's workout on Home, read from `/Orbite/hoje.json` that the Orbite app sends over File Transfer or writes to the card. Read-only lists with section headers; an out-of-date line when the RTC is on another day. See `docs/orbite.md`.
+- Orbite add-on (X3): **Hoje**, **Listas** and **Treinos** on Home, read from `/Orbite/hoje.json` that the Orbite app sends over File Transfer or writes to the card; an out-of-date line when the RTC is on another day. See `docs/orbite.md`.
+- Mark items on the reader with Confirm or the side button (checkboxes; a workout is done when all its exercises are). Marks are kept in `/Orbite/feitos.json` and go back to the Orbite on the next sync.
+- What the Orbite already has done comes checked; unchecking it on the reader goes back as `desfeitos` and the Orbite undoes it. The screens open on the first item still to do.
+- **Listas** and **Treinos** show the lists and the sheets first, each with its checked items ("3/7"); Confirm opens one, Back returns to them.
 
 ## [v1.6.1] - 2026-10-03
 

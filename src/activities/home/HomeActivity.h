@@ -11,6 +11,7 @@
 #include "./FileBrowserActivity.h"
 #include "QuickActions.h"
 #include "activities/Activity.h"
+#include "activities/orbite/OrbiteDayActivity.h"
 #include "activities/reader/BookReadingStats.h"
 #include "activities/reader/GlobalReadingStats.h"
 #include "components/CoverGridHomeUi.h"
@@ -106,7 +107,7 @@ class HomeActivity final : public Activity {
   void onOpdsBrowserOpen();
   void onReadingStatsOpen();
   void onSavedItemsOpen();
-  void onOrbiteOpen(bool today);  // Orbite add-on: Today or the Workout of the day
+  void onOrbiteOpen(OrbiteDayActivity::Mode mode);  // Orbite add-on: Today, the Lists or the Workouts
 
   int getMenuItemCount() const;
   bool storeCoverBuffer();    // Store frame buffer for cover image

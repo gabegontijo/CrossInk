@@ -57,7 +57,8 @@ constexpr int HOME_BOOK_SWAP_RECENT_COUNT = 2;
 
 enum class HomeMenuAction {
   OrbiteToday,
-  OrbiteWorkout,
+  OrbiteLists,
+  OrbiteWorkouts,
   BrowseFiles,
   ContinueReading,
   Library,
@@ -75,7 +76,7 @@ struct HomeMenuEntry {
 };
 
 struct HomeMenuEntries {
-  static constexpr int kCapacity = 10;  // + the two Orbite rows
+  static constexpr int kCapacity = 11;  // + the three Orbite rows
   std::array<HomeMenuEntry, kCapacity> entries{};
   int count = 0;
 
@@ -96,9 +97,15 @@ orbite::Summary gOrbiteSummary;
 void appendOrbiteMenuItems(HomeMenuEntries& items) {
   if (!gHasOrbiteDay) return;
   items.push({tr(STR_ORBITE_TODAY), Recent, HomeMenuAction::OrbiteToday});
-  if (!gOrbiteSummary.workoutTitle.empty()) {
-    items.push({gOrbiteSummary.workoutTitle.c_str(), Chart, HomeMenuAction::OrbiteWorkout});
-  }
+  if (gOrbiteSummary.lists > 0) items.push({tr(STR_ORBITE_LISTS), Text, HomeMenuAction::OrbiteLists});
+  if (gOrbiteSummary.workouts > 0) items.push({tr(STR_ORBITE_WORKOUTS), Chart, HomeMenuAction::OrbiteWorkouts});
+}
+
+// How many Home rows the add-on puts on top: the button navigation must count them, or it wraps before the last rows.
+int orbiteMenuItemCount() {
+  HomeMenuEntries items;
+  appendOrbiteMenuItems(items);
+  return items.size();
 }
 
 bool containsPoint(const Rect& rect, const int x, const int y) {
@@ -549,7 +556,8 @@ static_assert(HomeActivity::kMaxCachedBooks >= LyraCarouselMetrics::values.homeR
 int HomeActivity::getMenuItemCount() const {
   if (coverGridUi) return static_cast<int>(recentBooks.size()) + (hasOpdsServers ? 5 : 4);
   const auto& metrics = UITheme::getInstance().getMetrics();
-  int count = 4;  // File Browser, Library, File transfer, Settings
+  int count = 4;                   // File Browser, Library, File transfer, Settings
+  count += orbiteMenuItemCount();  // Orbite add-on: Today, Lists, Workouts
   if (!metrics.homeContinueReadingInMenu && !recentBooks.empty()) {
     count += getVisibleRecentBookCount();
   } else if (metrics.homeContinueReadingInMenu && !recentBooks.empty()) {
@@ -1477,10 +1485,13 @@ void HomeActivity::loop() {
       auto activateMinimalMenuAction = [this, &menuItems]() {
         switch (menuItems[minimalMenuIndex].action) {
           case HomeMenuAction::OrbiteToday:
-            onOrbiteOpen(true);
+            onOrbiteOpen(OrbiteDayActivity::Mode::Today);
             break;
-          case HomeMenuAction::OrbiteWorkout:
-            onOrbiteOpen(false);
+          case HomeMenuAction::OrbiteLists:
+            onOrbiteOpen(OrbiteDayActivity::Mode::Lists);
+            break;
+          case HomeMenuAction::OrbiteWorkouts:
+            onOrbiteOpen(OrbiteDayActivity::Mode::Workouts);
             break;
           case HomeMenuAction::BrowseFiles:
             onFileBrowserOpen();
@@ -1725,10 +1736,13 @@ void HomeActivity::loop() {
   auto activateHomeMenuAction = [this](const HomeMenuAction action) {
     switch (action) {
       case HomeMenuAction::OrbiteToday:
-        onOrbiteOpen(true);
+        onOrbiteOpen(OrbiteDayActivity::Mode::Today);
         break;
-      case HomeMenuAction::OrbiteWorkout:
-        onOrbiteOpen(false);
+      case HomeMenuAction::OrbiteLists:
+        onOrbiteOpen(OrbiteDayActivity::Mode::Lists);
+        break;
+      case HomeMenuAction::OrbiteWorkouts:
+        onOrbiteOpen(OrbiteDayActivity::Mode::Workouts);
         break;
       case HomeMenuAction::BrowseFiles:
         onFileBrowserOpen();
@@ -2415,8 +2429,7 @@ void HomeActivity::onReadingStatsOpen() {
   }
 }
 
-void HomeActivity::onOrbiteOpen(const bool today) {
-  const auto mode = today ? OrbiteDayActivity::Mode::Today : OrbiteDayActivity::Mode::Workout;
+void HomeActivity::onOrbiteOpen(const OrbiteDayActivity::Mode mode) {
   startActivityForResult(std::make_unique<OrbiteDayActivity>(renderer, mappedInput, mode),
                          [this](const ActivityResult&) { requestUpdate(); });
 }

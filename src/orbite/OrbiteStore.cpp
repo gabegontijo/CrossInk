@@ -3,63 +3,103 @@
 #include <HalClock.h>
 #include <HalStorage.h>
 #include <Logging.h>
-#include <Memory.h>
 
 #include "CrossPointSettings.h"
 
 namespace orbite {
 namespace {
 
-// Reads the whole file into a buffer sized to it (a few KB, freed by the caller's scope).
-template <typename Parse>
-bool withFile(Parse parse) {
-  if (!Storage.exists(HOJE_PATH)) return false;
+constexpr char FEITOS_TMP_PATH[] = "/Orbite/feitos.json.tmp";
+
+// ArduinoJson reads straight from the SD file, so a big day never sits in RAM as text — only the filtered part does.
+struct FileReader {
+  HalFile& file;
+  int read() { return file.read(); }
+  size_t readBytes(char* buffer, const size_t length) {
+    const int got = file.read(buffer, length);
+    return got < 0 ? 0 : static_cast<size_t>(got);
+  }
+};
+
+// Deserializes the file through the filter (or whole, without one). False when it is missing, too big or not JSON.
+bool deserializeFile(const char* path, JsonDocument& doc, JsonDocument* filter) {
+  if (!Storage.exists(path)) return false;
   HalFile file;
-  if (!Storage.openFileForRead("ORB", HOJE_PATH, file)) {
-    LOG_ERR("ORB", "Could not open %s", HOJE_PATH);
+  if (!Storage.openFileForRead("ORB", path, file)) {
+    LOG_ERR("ORB", "Could not open %s", path);
     return false;
   }
   const size_t size = file.fileSize();
   if (size == 0 || size > MAX_FILE_BYTES) {
     file.close();
-    LOG_ERR("ORB", "Ignoring %s: %u bytes", HOJE_PATH, static_cast<unsigned>(size));
+    LOG_ERR("ORB", "Ignoring %s: %u bytes", path, static_cast<unsigned>(size));
     return false;
   }
-  auto buffer = makeUniqueNoThrow<char[]>(size);
-  if (!buffer) {
-    file.close();
-    LOG_ERR("ORB", "No heap for %u bytes", static_cast<unsigned>(size));
-    return false;
-  }
-  const int read = file.read(buffer.get(), size);
+  FileReader reader{file};
+  const DeserializationError error =
+      filter ? deserializeJson(doc, reader, DeserializationOption::Filter(*filter)) : deserializeJson(doc, reader);
   file.close();
-  if (read != static_cast<int>(size)) {
-    LOG_ERR("ORB", "Short read of %s", HOJE_PATH);
-    return false;
-  }
-  return parse(buffer.get(), size);
+  if (error) LOG_ERR("ORB", "Bad JSON in %s: %s", path, error.c_str());
+  return !error;
+}
+
+bool rtcToday(std::string& out) {
+  uint16_t year = 0;
+  uint8_t month = 0, day = 0, hour = 0, minute = 0;
+  if (!halClock.isAvailable() || !halClock.getDateTime(year, month, day, hour, minute) || year < 2024) return false;
+  out = localDate(year, month, day, hour, minute, SETTINGS.clockUtcOffsetQ);
+  return !out.empty();
 }
 
 }  // namespace
 
 bool loadSummary(Summary& out) {
-  return withFile([&out](const char* json, const size_t size) { return parseSummary(json, size, out); });
+  out = Summary{};
+  JsonDocument filter;
+  summaryFilter(filter);
+  JsonDocument doc;
+  return deserializeFile(HOJE_PATH, doc, &filter) && readSummary(doc.as<JsonVariantConst>(), out);
 }
 
-bool loadDay(Day& out) {
-  const bool ok = withFile([&out](const char* json, const size_t size) { return parseDay(json, size, out); });
+bool loadDay(const Part part, Day& out) {
+  out = Day{};
+  JsonDocument filter;
+  dayFilter(filter, part);
+  JsonDocument doc;
+  const bool ok = deserializeFile(HOJE_PATH, doc, &filter) && readDay(doc.as<JsonVariantConst>(), part, out);
   if (!ok) LOG_ERR("ORB", "No Orbite day in %s", HOJE_PATH);
   return ok;
 }
 
-bool isStale(const Day& day) {
-  uint16_t year = 0;
-  uint8_t month = 0, dayOfMonth = 0, hour = 0, minute = 0;
-  if (!halClock.isAvailable() || !halClock.getDateTime(year, month, dayOfMonth, hour, minute) || year < 2024) {
+void loadMarks(Marks& out) {
+  out = Marks{};
+  JsonDocument doc;
+  if (deserializeFile(FEITOS_PATH, doc, nullptr)) readMarks(doc.as<JsonVariantConst>(), out);
+}
+
+bool saveMarks(const Marks& marks) {
+  // Written beside and renamed over, so a power cut never leaves half a file (and the marks of the day lost).
+  if (!Storage.ensureDirectoryExists("/Orbite") ||
+      !Storage.writeFile(FEITOS_TMP_PATH, String(serializeMarks(marks).c_str()))) {
+    LOG_ERR("ORB", "Could not write %s", FEITOS_TMP_PATH);
     return false;
   }
-  const std::string today = localDate(year, month, dayOfMonth, hour, minute, SETTINGS.clockUtcOffsetQ);
-  return !today.empty() && !day.date.empty() && today != day.date;
+  Storage.remove(FEITOS_PATH);
+  if (!Storage.rename(FEITOS_TMP_PATH, FEITOS_PATH)) {
+    LOG_ERR("ORB", "Could not rename %s", FEITOS_TMP_PATH);
+    return false;
+  }
+  return true;
+}
+
+std::string markDate(const Day& day) {
+  std::string today;
+  return rtcToday(today) ? today : day.date;
+}
+
+bool isStale(const Day& day) {
+  std::string today;
+  return rtcToday(today) && !day.date.empty() && today != day.date;
 }
 
 }  // namespace orbite
